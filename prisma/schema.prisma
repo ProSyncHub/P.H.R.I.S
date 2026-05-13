@@ -1,0 +1,303 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+enum UserRole {
+  ADMIN
+  MANAGER
+  EMPLOYEE
+}
+
+enum EmployeeStatus {
+  ACTIVE
+  INACTIVE
+  ON_LEAVE
+}
+
+enum RiskLevel {
+  GREEN
+  YELLOW
+  RED
+}
+
+enum SyncStatus {
+  PENDING
+  SYNCED
+  FAILED
+  RETRY_REQUIRED
+}
+
+enum WeeklyScope {
+  EMPLOYEE
+  DEPARTMENT
+}
+
+enum ReportType {
+  DETAILED_ACTIVITY
+  LOGIN_LOGOUT
+}
+
+enum RuleScope {
+  GLOBAL
+  DEPARTMENT
+}
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String    @unique
+  emailVerified DateTime?
+  image         String?
+  passwordHash  String?
+  role          UserRole  @default(ADMIN)
+  accounts      Account[]
+  sessions      Session[]
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+model Employee {
+  id                       String          @id @default(cuid())
+  employeeId               String          @unique
+  fullName                 String
+  email                    String          @unique
+  department               String
+  role                     String
+  reportingManager         String?
+  status                   EmployeeStatus  @default(ACTIVE)
+  notionEmployeeReference  String?
+  uploadedReports          UploadedReport[]
+  dailyAnalyses            DailyAnalysis[]
+  weeklyAnalyses           WeeklyAnalysis[]
+  createdAt                DateTime        @default(now())
+  updatedAt                DateTime        @updatedAt
+}
+
+model UploadedReport {
+  id              String        @id @default(cuid())
+  employeeId      String
+  dailyAnalysisId String?
+  reportType      ReportType
+  fileName        String
+  mimeType        String
+  fileSize        Int
+  parsedJson      Json
+  employee        Employee      @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  dailyAnalysis   DailyAnalysis? @relation(fields: [dailyAnalysisId], references: [id], onDelete: SetNull)
+  createdAt       DateTime      @default(now())
+}
+
+model DailyAnalysis {
+  id                         String          @id @default(cuid())
+  employeeId                 String
+  reportDate                 DateTime
+  loginTime                  String?
+  logoutTime                 String?
+  totalHours                 Float           @default(0)
+  productiveHours            Float           @default(0)
+  unproductiveTime           Float           @default(0)
+  idleTime                   Float           @default(0)
+  eodRawText                 String          @db.Text
+  eodSummary                 String          @db.Text
+  activitySummaryJson        Json
+  loginLogoutSummaryJson     Json
+  eodAnalysisJson            Json
+  mismatchAnalysis           String          @db.Text
+  score                      Int
+  riskLevel                  RiskLevel
+  flagsJson                  Json
+  managerSummary             String          @db.Text
+  recommendation             String          @db.Text
+  notionSyncStatus           SyncStatus      @default(PENDING)
+  notionPageId               String?
+  employee                   Employee        @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  uploadedReports            UploadedReport[]
+  analysisFlags              AnalysisFlag[]
+  notionSyncLogs             NotionSyncLog[]
+  weeklyAnalysisSources      WeeklyAnalysisSource[]
+  createdAt                  DateTime        @default(now())
+  updatedAt                  DateTime        @updatedAt
+
+  @@index([reportDate])
+  @@index([riskLevel])
+}
+
+model WeeklyAnalysis {
+  id               String                 @id @default(cuid())
+  scope            WeeklyScope
+  weekStart        DateTime
+  weekEnd          DateTime
+  employeeId       String?
+  department       String?
+  dailyCount       Int                    @default(0)
+  totalHours       Float                  @default(0)
+  productiveHours  Float                  @default(0)
+  unproductiveTime Float                  @default(0)
+  idleTime         Float                  @default(0)
+  averageScore     Float                  @default(0)
+  lowestScore      Int                    @default(0)
+  highestScore     Int                    @default(0)
+  score            Int
+  riskLevel        RiskLevel
+  summaryJson      Json
+  flagsJson        Json
+  managerSummary   String                 @db.Text
+  recommendation   String                 @db.Text
+  notionSyncStatus SyncStatus             @default(PENDING)
+  notionPageId     String?
+  employee         Employee?              @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  sources          WeeklyAnalysisSource[]
+  notionSyncLogs   WeeklyNotionSyncLog[]
+  createdAt        DateTime               @default(now())
+  updatedAt        DateTime               @updatedAt
+
+  @@index([weekStart, weekEnd])
+  @@index([scope])
+  @@index([employeeId])
+  @@index([department])
+}
+
+model WeeklyAnalysisSource {
+  id              String         @id @default(cuid())
+  weeklyAnalysisId String
+  dailyAnalysisId  String
+  weeklyAnalysis   WeeklyAnalysis @relation(fields: [weeklyAnalysisId], references: [id], onDelete: Cascade)
+  dailyAnalysis    DailyAnalysis  @relation(fields: [dailyAnalysisId], references: [id], onDelete: Cascade)
+  createdAt        DateTime       @default(now())
+
+  @@unique([weeklyAnalysisId, dailyAnalysisId])
+  @@index([dailyAnalysisId])
+}
+
+model AnalysisFlag {
+  id              String        @id @default(cuid())
+  dailyAnalysisId String
+  type            String
+  severity        String
+  message         String
+  dailyAnalysis   DailyAnalysis @relation(fields: [dailyAnalysisId], references: [id], onDelete: Cascade)
+  createdAt       DateTime      @default(now())
+}
+
+model NotionSyncLog {
+  id              String        @id @default(cuid())
+  dailyAnalysisId String
+  status          SyncStatus
+  message         String
+  notionPageId    String?
+  payload         Json?
+  dailyAnalysis   DailyAnalysis @relation(fields: [dailyAnalysisId], references: [id], onDelete: Cascade)
+  createdAt       DateTime      @default(now())
+}
+
+model WeeklyNotionSyncLog {
+  id              String         @id @default(cuid())
+  weeklyAnalysisId String
+  status          SyncStatus
+  message         String
+  notionPageId    String?
+  payload         Json?
+  weeklyAnalysis  WeeklyAnalysis @relation(fields: [weeklyAnalysisId], references: [id], onDelete: Cascade)
+  createdAt       DateTime       @default(now())
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  actorId   String?
+  action    String
+  entity    String
+  entityId  String?
+  metadata  Json?
+  createdAt DateTime @default(now())
+}
+
+model PerformanceRuleSet {
+  id                               String    @id @default(cuid())
+  name                             String
+  scope                            RuleScope @default(GLOBAL)
+  department                       String?
+  isActive                         Boolean   @default(true)
+  workingDays                      Json
+  expectedLoginMinutes             Int
+  expectedLogoutMinutes            Int
+  gracePeriodMinutes               Int
+  minimumWorkingHours              Float
+  idealWorkingHours                Float
+  shortDayThresholdHours           Float
+  criticalShortDayThresholdHours   Float
+  productivePctGood                Float
+  productivePctWarning             Float
+  idlePctWarning                   Float
+  idlePctCritical                  Float
+  irrelevantUsageWarningMinutes    Int
+  irrelevantUsageCriticalMinutes   Int
+  eodScoreClear                    Int
+  eodScoreAverage                  Int
+  eodScoreVague                    Int
+  eodScoreWeak                     Int
+  timechampEodMatchGoodPct         Float
+  timechampEodMatchWarningPct      Float
+  riskGreenMin                     Int
+  riskYellowMin                    Int
+  createdAt                        DateTime  @default(now())
+  updatedAt                        DateTime  @updatedAt
+
+  @@index([scope, department])
+  @@index([isActive])
+}
+
+model RoleUsageRule {
+  id                 String   @id @default(cuid())
+  role               String
+  department         String?
+  isActive           Boolean  @default(true)
+  relevantApps       Json
+  relevantWebsites   Json
+  irrelevantApps     Json
+  irrelevantWebsites Json
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@index([role, department])
+  @@index([isActive])
+}
